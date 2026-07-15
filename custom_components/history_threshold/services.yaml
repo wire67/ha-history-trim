@@ -1,0 +1,57 @@
+purge_outliers:
+  name: Purge outlier states
+  description: >-
+    Permanently deletes recorder state-history rows for the given entities
+    that match a threshold filter within a time window. Use with caution:
+    this bypasses the History Trim panel's confirmation dialog and
+    cannot be undone. Intended for automating cleanup of known-bad sensor
+    data (e.g. run nightly to strip out-of-range spikes).
+  fields:
+    entity_id:
+      name: Entities
+      description: One or more entities to purge outlier rows from.
+      required: true
+      selector:
+        entity:
+          multiple: true
+    start_time:
+      name: Start time
+      description: Only consider rows at or after this time.
+      required: true
+      selector:
+        datetime:
+    end_time:
+      name: End time
+      description: Only consider rows at or before this time. Defaults to now.
+      required: false
+      selector:
+        datetime:
+    mode:
+      name: Filter mode
+      description: >-
+        "outside" deletes rows below min OR above max (typical for corrupt
+        data). "above"/"below" only need one threshold. "inside" deletes
+        rows within the range instead.
+      required: false
+      default: outside
+      selector:
+        select:
+          options:
+            - "above"
+            - "below"
+            - "outside"
+            - "inside"
+    min_threshold:
+      name: Minimum threshold
+      required: false
+      selector:
+        number:
+          mode: box
+          step: any
+    max_threshold:
+      name: Maximum threshold
+      required: false
+      selector:
+        number:
+          mode: box
+          step: any
