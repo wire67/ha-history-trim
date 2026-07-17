@@ -81,11 +81,16 @@ This integration reaches into recorder-internal SQLAlchemy models
 (`homeassistant.components.recorder.db_schema`), which is not a stable
 public API and can change between Home Assistant core releases. It was
 written against the schema used by modern (2024.x+) core, where states are
-split across `states`, `states_meta`, and `state_attributes` tables. If you
-upgrade Home Assistant and the panel starts failing to load history, check
-the Home Assistant log for `history_trim` errors — the recorder schema
-may have changed and the query in `websocket_api.py` will need a small
-update to match.
+split across `states`, `states_meta`, and `state_attributes` tables, and
+statistics are split across `statistics` and `statistics_meta`. If you
+upgrade Home Assistant and the panel starts failing to load history or
+outliers, check the Home Assistant log for `history_trim` errors — the
+recorder schema may have changed and the relevant query in
+`websocket_api.py` will need a small update to match. The one part that's
+*not* home-grown is the actual statistics correction (the Outliers tab's
+fix buttons call core's own `recorder/adjust_sum_statistics` websocket
+command), so that part should keep working even if the schema shifts
+underneath the read-only outlier scan.
 
 ### If you edit the panel JS yourself
 
@@ -148,10 +153,39 @@ old URL.
    - `inside` – value is within **Min**–**Max**.
    - `none` – no threshold filter, behaves like core History (all rows).
 5. Click **Load history**.
-6. Switch between **Table** and **Graph** view.
+6. Switch between **Table**, **Graph**, and **Outliers** view.
 7. In table view, click 🗑 on any row to delete just that row, or **Delete
    all shown** to remove every row currently matching your filter. Both
    ask for confirmation first.
+
+### Fixing Energy dashboard outliers
+
+The **Outliers** tab is separate from the table/graph above: it doesn't
+touch raw history at all, it looks at **long-term statistics** — the
+hourly data the Energy dashboard actually reads (see [Limitations](#limitations--things-to-know)
+below for why that's a different thing from history).
+
+1. Select the cumulative sensors you care about (energy/water/gas meters —
+   anything with `state_class: total` or `total_increasing`).
+2. Set a time range and, optionally, adjust **Outlier sensitivity** — this
+   is how many "median absolute deviations" a hour's consumption has to be
+   from that entity's typical hourly delta before it's flagged. Higher =
+   stricter (fewer, more obvious outliers); lower = more sensitive.
+3. Switch to the **Outliers** tab and click **Scan for outliers**.
+4. Each flagged hour shows its actual consumption next to the entity's
+   typical hourly delta, with three ways to fix it:
+   - **Zero this hour** – treat the hour's consumption as 0 (use when you're
+     confident the whole spike is bogus).
+   - **Reset to typical** – replace this hour's consumption with the
+     entity's median hourly delta.
+   - **Custom** – type the consumption value this hour *should* have shown
+     and click Apply.
+
+   All three call Home Assistant's own `recorder/adjust_sum_statistics`
+   websocket command directly (the same one core's own "Adjust a
+   statistic" UI in Developer Tools → Statistics uses), so the correction
+   is applied using core's tested logic, not a reimplementation of it. You
+   get a confirmation dialog first — like row deletion, this is permanent.
 
 ### Automating cleanup
 
@@ -182,12 +216,21 @@ data:
   other row whose `old_state_id` pointed at the deleted row has that link
   nulled out automatically (otherwise SQLite raises a foreign key
   constraint error on delete).
-- This does not touch long-term statistics (`statistics` /
-  `statistics_short_term` tables used by the Energy dashboard and
-  history graphs with a long time range). If a corrupt point has already
-  been aggregated into statistics, you'll need to fix that separately —
-  ask in the Home Assistant community for statistics-editing tools if that
-  applies to you.
+- Deleting or filtering `states` rows never touches long-term statistics
+  (`statistics` / `statistics_short_term`, the tables the Energy dashboard
+  actually reads). Use the **Outliers** tab for that instead — it reads and
+  corrects statistics directly, separately from the history table/graph.
+- Outlier detection in the Statistics tab only looks at cumulative
+  (`total`/`total_increasing`) sensors, since "consumption" is derived from
+  the delta between consecutive hourly sums. Plain `measurement`-class
+  statistics (e.g. temperature) have no running total to compare against
+  and are skipped.
+- The `recorder/adjust_sum_statistics` command used by the Outliers tab's
+  fix buttons shifts the running total for that entity from the corrected
+  hour *onward* by the adjustment amount — it's the same behavior as core's
+  own "Adjust a statistic" UI, including the same caveat: the correction
+  changes the cumulative total but the graph's per-hour bar for other hours
+  isn't independently recomputed.
 - The entity picker loads all entities into a checkbox list; on very large
   installations (thousands of entities) the filter box is there to help you
   narrow it down quickly.

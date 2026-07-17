@@ -17,7 +17,12 @@ from homeassistant.components.recorder import get_instance
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
-from .const import WS_TYPE_DELETE_ROW, WS_TYPE_DELETE_ROWS, WS_TYPE_HISTORY
+from .const import (
+    WS_TYPE_DELETE_ROW,
+    WS_TYPE_DELETE_ROWS,
+    WS_TYPE_HISTORY,
+    WS_TYPE_STATISTICS,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -27,6 +32,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_get_history)
     websocket_api.async_register_command(hass, ws_delete_row)
     websocket_api.async_register_command(hass, ws_delete_rows)
+    websocket_api.async_register_command(hass, ws_get_statistics)
 
 
 # ---------------------------------------------------------------------------
@@ -293,3 +299,158 @@ async def ws_delete_rows(
     except Exception as err:  # noqa: BLE001
         _LOGGER.exception("Error deleting rows")
         connection.send_error(msg["id"], "history_trim_delete_error", str(err))
+
+
+# ---------------------------------------------------------------------------
+# Long-term statistics outlier detection (read-only)
+#
+# We deliberately do NOT reimplement statistics *adjustment* here - that
+# requires correctly propagating a correction through both the
+# `statistics` and `statistics_short_term` tables, which is exactly the
+# kind of recorder-internal logic that's easy to get subtly wrong. Fixing
+# a flagged outlier is instead done from the frontend by calling Home
+# Assistant's own existing `recorder/adjust_sum_statistics` websocket
+# command directly - the same command the core "Adjust a statistic" UI
+# uses - so we inherit core's own tested logic instead of duplicating it.
+# ---------------------------------------------------------------------------
+
+
+def _fetch_statistics_sync(
+    hass: HomeAssistant,
+    entity_ids: list[str],
+    start_time,
+    end_time,
+    outlier_factor: float,
+) -> list[dict[str, Any]]:
+    """Fetch hourly long-term statistics and flag outlier hours.
+
+    Only entities with a running `sum` (state_class total / total_increasing
+    - e.g. energy, water, gas meters) are considered: those are the ones
+    that feed the Energy dashboard's consumption bars, and "consumption for
+    this hour" is derived as sum[i] - sum[i-1]. Plain "measurement" class
+    statistics (mean/min/max only, e.g. temperature) have no running total
+    to flag spikes against and are skipped.
+
+    Outlier detection uses a simple, robust (non-parametric) method: for
+    each entity, compute the median hourly delta and the median absolute
+    deviation (MAD) from that median, then flag any hour whose delta is
+    more than `outlier_factor` MADs away from the median. This is
+    intentionally simple rather than a full statistical model - it's meant
+    to surface obvious spikes (a sensor briefly reporting a huge jump), not
+    to be a rigorous anomaly detector.
+    """
+    import statistics as pystats
+
+    from homeassistant.components.recorder.db_schema import Statistics, StatisticsMeta
+    from homeassistant.components.recorder.util import session_scope
+
+    results: list[dict[str, Any]] = []
+
+    with session_scope(hass=hass, read_only=True) as session:
+        query = (
+            session.query(
+                Statistics.id,
+                Statistics.start_ts,
+                Statistics.sum,
+                Statistics.mean,
+                Statistics.min,
+                Statistics.max,
+                StatisticsMeta.statistic_id,
+                StatisticsMeta.unit_of_measurement,
+                StatisticsMeta.has_sum,
+            )
+            .join(StatisticsMeta, Statistics.metadata_id == StatisticsMeta.id)
+            .filter(StatisticsMeta.statistic_id.in_(entity_ids))
+            .filter(Statistics.start_ts >= start_time.timestamp())
+        )
+        if end_time is not None:
+            query = query.filter(Statistics.start_ts <= end_time.timestamp())
+        query = query.order_by(StatisticsMeta.statistic_id, Statistics.start_ts)
+
+        by_entity: dict[str, list] = {}
+        for row in query:
+            by_entity.setdefault(row.statistic_id, []).append(row)
+
+        for statistic_id, rows in by_entity.items():
+            if not rows or not rows[0].has_sum:
+                continue  # not a cumulative sensor - nothing to flag here
+
+            unit = rows[0].unit_of_measurement
+            prev_sum: float | None = None
+            entity_rows: list[dict[str, Any]] = []
+            deltas: list[float] = []
+
+            for row in rows:
+                delta = None
+                if row.sum is not None and prev_sum is not None:
+                    delta = row.sum - prev_sum
+                if row.sum is not None:
+                    prev_sum = row.sum
+
+                entity_rows.append(
+                    {
+                        "id": row.id,
+                        "entity_id": statistic_id,
+                        "start": dt_util.utc_from_timestamp(row.start_ts).isoformat(),
+                        "sum": row.sum,
+                        "delta": delta,
+                        "unit_of_measurement": unit,
+                    }
+                )
+                if delta is not None:
+                    deltas.append(delta)
+
+            median = pystats.median(deltas) if deltas else None
+            mad = None
+            if deltas:
+                mad = pystats.median(abs(d - median) for d in deltas)
+            # A near-zero MAD means the baseline is extremely steady, which
+            # would make the outlier test hypersensitive to tiny wobbles.
+            # Fall back to a fraction of the median magnitude in that case.
+            effective_mad = mad if mad and mad > 0 else abs(median) * 0.5 if median else 0
+
+            for r in entity_rows:
+                is_outlier = False
+                if r["delta"] is not None and median is not None and effective_mad > 0:
+                    is_outlier = abs(r["delta"] - median) > outlier_factor * effective_mad
+                r["is_outlier"] = is_outlier
+                r["baseline_delta"] = median
+                results.append(r)
+
+    return results
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): WS_TYPE_STATISTICS,
+        vol.Required("entity_ids"): [str],
+        vol.Required("start_time"): str,
+        vol.Optional("end_time"): str,
+        vol.Optional("outlier_factor", default=5.0): vol.Coerce(float),
+    }
+)
+@websocket_api.async_response
+async def ws_get_statistics(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    """Handle a request for hourly statistics with outlier flags."""
+    try:
+        start_time = dt_util.parse_datetime(msg["start_time"])
+        if start_time is None:
+            raise ValueError("invalid start_time")
+        end_time = None
+        if msg.get("end_time"):
+            end_time = dt_util.parse_datetime(msg["end_time"])
+
+        rows = await get_instance(hass).async_add_executor_job(
+            _fetch_statistics_sync,
+            hass,
+            msg["entity_ids"],
+            start_time,
+            end_time,
+            msg["outlier_factor"],
+        )
+        connection.send_result(msg["id"], {"rows": rows})
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.exception("Error fetching statistics")
+        connection.send_error(msg["id"], "history_trim_statistics_error", str(err))

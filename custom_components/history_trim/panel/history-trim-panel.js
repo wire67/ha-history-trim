@@ -23,10 +23,14 @@ class HistoryTrimPanel extends HTMLElement {
     this._hass = null;
     this._initialized = false;
 
-    this._view = "table"; // "table" | "graph"
+    this._view = "table"; // "table" | "graph" | "outliers"
     this._rows = [];
     this._loading = false;
     this._error = null;
+
+    this._statRows = [];
+    this._statLoading = false;
+    this._statError = null;
 
     const saved = this._loadFormState();
     this._selectedEntities = saved.selectedEntities || [];
@@ -36,6 +40,7 @@ class HistoryTrimPanel extends HTMLElement {
     this._maxThreshold = saved.maxThreshold ?? "";
     this._startTime = saved.startTime || this._defaultStart();
     this._endTime = saved.endTime ?? "";
+    this._outlierFactor = saved.outlierFactor ?? "5";
   }
 
   _loadFormState() {
@@ -59,6 +64,7 @@ class HistoryTrimPanel extends HTMLElement {
           maxThreshold: this._maxThreshold,
           startTime: this._startTime,
           endTime: this._endTime,
+          outlierFactor: this._outlierFactor,
         })
       );
     } catch (err) {
@@ -152,6 +158,86 @@ class HistoryTrimPanel extends HTMLElement {
     }
     this._loading = false;
     this._render();
+  }
+
+  async _fetchStatistics() {
+    if (!this._hass) return;
+    if (this._selectedEntities.length === 0) {
+      this._statError = "Select at least one entity first.";
+      this._render();
+      return;
+    }
+    if (!this._startTime) {
+      this._statError = "Start time is required.";
+      this._render();
+      return;
+    }
+
+    this._statLoading = true;
+    this._statError = null;
+    this._render();
+
+    const factor = parseFloat(this._outlierFactor);
+    const msg = {
+      type: "history_trim/statistics",
+      entity_ids: this._selectedEntities,
+      start_time: new Date(this._startTime).toISOString(),
+      outlier_factor: Number.isFinite(factor) && factor > 0 ? factor : 5,
+    };
+    if (this._endTime) {
+      msg.end_time = new Date(this._endTime).toISOString();
+    }
+
+    try {
+      const result = await this._hass.callWS(msg);
+      this._statRows = result.rows;
+    } catch (err) {
+      this._statError = (err && err.message) || String(err);
+    }
+    this._statLoading = false;
+    this._render();
+  }
+
+  /**
+   * Apply a correction to a flagged hour by calling Home Assistant's own
+   * `recorder/adjust_sum_statistics` websocket command directly - the same
+   * command core's "Adjust a statistic" UI uses. `adjustment` is the delta
+   * to add to the running sum from this hour onward (a negative number to
+   * remove an inflated spike).
+   */
+  async _applyStatAdjustment(row, adjustment) {
+    if (!Number.isFinite(adjustment) || adjustment === 0) {
+      window.alert("Enter a non-zero adjustment.");
+      return;
+    }
+    const ok = window.confirm(
+      `Adjust "${row.entity_id}" by ${adjustment.toFixed(3)} ${
+        row.unit_of_measurement || ""
+      } starting at ${new Date(row.start).toLocaleString()}?\n\n` +
+        "This permanently shifts the recorded running total from this hour " +
+        "onward and cannot be undone from here."
+    );
+    if (!ok) return;
+
+    try {
+      await this._hass.callWS({
+        type: "recorder/adjust_sum_statistics",
+        statistic_id: row.entity_id,
+        start: row.start,
+        adjustment,
+        adjustment_unit_of_measurement: row.unit_of_measurement || null,
+      });
+      // Optimistic local update: reflect the correction immediately without
+      // a full re-scan, and clear the outlier flag on this row.
+      row.delta = row.delta + adjustment;
+      row.is_outlier = false;
+      row.fixed = true;
+      this._render();
+    } catch (err) {
+      window.alert(
+        "Failed to adjust statistic: " + ((err && err.message) || err)
+      );
+    }
   }
 
   async _deleteRow(rowId) {
@@ -290,10 +376,38 @@ class HistoryTrimPanel extends HTMLElement {
             </div>
           </div>
 
-          <button id="load-btn" class="primary-btn" ${this._loading ? "disabled" : ""}>
-            ${this._loading ? "Loading…" : "Load history"}
+          <div class="section-title">Statistics outliers</div>
+          <label class="field-label">Outlier sensitivity (higher = stricter)</label>
+          <input id="outlier-factor" class="text-input" type="number" step="0.5" min="0.5" value="${this._escape(
+            this._outlierFactor
+          )}" placeholder="5" />
+          <div class="hint">
+            Used by the "Outliers" tab to flag hours whose consumption is
+            far from that entity's typical hourly delta. Only applies to
+            cumulative (total / total_increasing) sensors.
+          </div>
+
+          <button id="load-btn" class="primary-btn" ${
+            (this._view === "outliers" ? this._statLoading : this._loading)
+              ? "disabled"
+              : ""
+          }>
+            ${
+              this._view === "outliers"
+                ? this._statLoading
+                  ? "Scanning…"
+                  : "Scan for outliers"
+                : this._loading
+                ? "Loading…"
+                : "Load history"
+            }
           </button>
           ${this._error ? `<div class="error">${this._escape(this._error)}</div>` : ""}
+          ${
+            this._statError
+              ? `<div class="error">${this._escape(this._statError)}</div>`
+              : ""
+          }
         </div>
 
         <div class="card results">
@@ -301,10 +415,19 @@ class HistoryTrimPanel extends HTMLElement {
             <div class="view-toggle">
               <button class="toggle-btn ${this._view === "table" ? "active" : ""}" data-view="table">Table</button>
               <button class="toggle-btn ${this._view === "graph" ? "active" : ""}" data-view="graph">Graph</button>
+              <button class="toggle-btn ${this._view === "outliers" ? "active" : ""}" data-view="outliers">Outliers</button>
             </div>
-            <div class="results-count">${this._rows.length} row(s)</div>
+            <div class="results-count">
+              ${
+                this._view === "outliers"
+                  ? `${this._statRows.filter((r) => r.is_outlier).length} outlier(s) of ${
+                      this._statRows.length
+                    } hour(s)`
+                  : `${this._rows.length} row(s)`
+              }
+            </div>
             ${
-              this._rows.length > 0
+              this._view !== "outliers" && this._rows.length > 0
                 ? `<button id="delete-all-btn" class="danger-btn">Delete all shown</button>`
                 : ""
             }
@@ -313,6 +436,8 @@ class HistoryTrimPanel extends HTMLElement {
             ${
               this._view === "table"
                 ? this._renderTable()
+                : this._view === "outliers"
+                ? this._renderOutliers()
                 : `<div class="graph-wrap"><canvas id="graph-canvas"></canvas></div>`
             }
           </div>
@@ -327,6 +452,72 @@ class HistoryTrimPanel extends HTMLElement {
       requestAnimationFrame(() => this._drawGraph());
     }
   }
+
+  _renderOutliers() {
+    if (this._statRows.length === 0) {
+      return `<div class="empty">No outlier scan run yet. Set your filters, adjust sensitivity if needed, and click "Scan for outliers".</div>`;
+    }
+    const flagged = this._statRows.filter((r) => r.is_outlier || r.fixed);
+    if (flagged.length === 0) {
+      return `<div class="empty">Scanned ${this._statRows.length} hour(s) across your selected entities - no outliers found at this sensitivity.</div>`;
+    }
+    return `
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Entity</th>
+            <th>Hour</th>
+            <th>This hour</th>
+            <th>Typical</th>
+            <th>Fix</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${flagged
+            .map((row) => {
+              const idx = this._statRows.indexOf(row);
+              const unit = row.unit_of_measurement || "";
+              const delta = row.delta !== null ? row.delta.toFixed(3) : "—";
+              const baseline =
+                row.baseline_delta !== null ? row.baseline_delta.toFixed(3) : "—";
+              if (row.fixed) {
+                return `
+                  <tr class="fixed-row">
+                    <td class="entity-cell" title="${this._escape(row.entity_id)}">${this._escape(
+                  row.entity_id
+                )}</td>
+                    <td>${this._escape(new Date(row.start).toLocaleString())}</td>
+                    <td class="numeric">${delta} ${this._escape(unit)}</td>
+                    <td class="numeric">${baseline} ${this._escape(unit)}</td>
+                    <td>✅ Fixed</td>
+                  </tr>
+                `;
+              }
+              return `
+                <tr class="outlier-row">
+                  <td class="entity-cell" title="${this._escape(row.entity_id)}">${this._escape(
+                row.entity_id
+              )}</td>
+                  <td>${this._escape(new Date(row.start).toLocaleString())}</td>
+                  <td class="numeric flagged">${delta} ${this._escape(unit)}</td>
+                  <td class="numeric">${baseline} ${this._escape(unit)}</td>
+                  <td>
+                    <div class="fix-actions">
+                      <button class="fix-btn" data-stat-index="${idx}" data-action="zero">Zero this hour</button>
+                      <button class="fix-btn" data-stat-index="${idx}" data-action="typical">Reset to typical</button>
+                      <input class="fix-custom-input" type="number" step="any" data-stat-index="${idx}" placeholder="custom Δ" />
+                      <button class="fix-btn" data-stat-index="${idx}" data-action="custom">Apply</button>
+                    </div>
+                  </td>
+                </tr>
+              `;
+            })
+            .join("")}
+        </tbody>
+      </table>
+    `;
+  }
+
 
   _renderTable() {
     if (this._rows.length === 0) {
@@ -633,10 +824,19 @@ class HistoryTrimPanel extends HTMLElement {
         this._saveFormState();
       });
     }
+    const outlierFactor = root.getElementById("outlier-factor");
+    if (outlierFactor) {
+      outlierFactor.addEventListener("change", (e) => {
+        this._outlierFactor = e.target.value;
+        this._saveFormState();
+      });
+    }
 
     const loadBtn = root.getElementById("load-btn");
     if (loadBtn) {
-      loadBtn.addEventListener("click", () => this._fetchHistory());
+      loadBtn.addEventListener("click", () =>
+        this._view === "outliers" ? this._fetchStatistics() : this._fetchHistory()
+      );
     }
 
     root.querySelectorAll(".toggle-btn").forEach((btn) => {
@@ -657,6 +857,32 @@ class HistoryTrimPanel extends HTMLElement {
     if (deleteAllBtn) {
       deleteAllBtn.addEventListener("click", () => this._deleteAllFiltered());
     }
+
+    root.querySelectorAll(".fix-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const idx = parseInt(btn.getAttribute("data-stat-index"), 10);
+        const action = btn.getAttribute("data-action");
+        const row = this._statRows[idx];
+        if (!row || row.delta === null) return;
+
+        if (action === "zero") {
+          this._applyStatAdjustment(row, -row.delta);
+        } else if (action === "typical") {
+          const baseline = row.baseline_delta ?? 0;
+          this._applyStatAdjustment(row, baseline - row.delta);
+        } else if (action === "custom") {
+          const input = root.querySelector(
+            `.fix-custom-input[data-stat-index="${idx}"]`
+          );
+          const desired = input ? parseFloat(input.value) : NaN;
+          if (!Number.isFinite(desired)) {
+            window.alert("Enter the desired consumption for this hour first.");
+            return;
+          }
+          this._applyStatAdjustment(row, desired - row.delta);
+        }
+      });
+    });
   }
 
   _escape(value) {
@@ -853,6 +1079,43 @@ class HistoryTrimPanel extends HTMLElement {
       .delete-btn:hover {
         background: var(--error-color, #db4437);
         border-color: var(--error-color, #db4437);
+      }
+      .outlier-row td.flagged {
+        color: var(--error-color, #db4437);
+        font-weight: 600;
+      }
+      .fixed-row {
+        opacity: 0.6;
+      }
+      .fix-actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+      }
+      .fix-btn {
+        padding: 4px 8px;
+        font-size: 12px;
+        border: 1px solid var(--divider-color, #ccc);
+        border-radius: 4px;
+        background: var(--card-background-color, #fff);
+        color: var(--primary-text-color, #212121);
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .fix-btn:hover {
+        background: var(--primary-color, #03a9f4);
+        color: #fff;
+        border-color: var(--primary-color, #03a9f4);
+      }
+      .fix-custom-input {
+        width: 80px;
+        padding: 4px 6px;
+        font-size: 12px;
+        border: 1px solid var(--divider-color, #ccc);
+        border-radius: 4px;
+        background: var(--card-background-color, #fff);
+        color: var(--primary-text-color, #212121);
       }
       .graph-wrap {
         width: 100%;
