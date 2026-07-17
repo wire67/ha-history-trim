@@ -26,6 +26,7 @@ from .const import (
     PANEL_ICON,
     PANEL_TITLE,
     PANEL_URL,
+    PANEL_VERSION,
     SERVICE_PURGE_OUTLIERS,
 )
 from .websocket_api import async_register_websocket_commands
@@ -61,7 +62,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         hass,
         webcomponent_name="history-trim-panel",
         frontend_url_path=PANEL_URL,
-        module_url=f"{JS_STATIC_PATH}/{JS_FILENAME}",
+        module_url=f"{JS_STATIC_PATH}/{JS_FILENAME}?v={PANEL_VERSION}",
         sidebar_title=PANEL_TITLE,
         sidebar_icon=PANEL_ICON,
         require_admin=True,

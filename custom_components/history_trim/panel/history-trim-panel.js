@@ -388,6 +388,17 @@ class HistoryTrimPanel extends HTMLElement {
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, width, height);
 
+    // Tooltip element lives alongside the canvas and is positioned
+    // imperatively on hover - it is not part of the innerHTML template so
+    // that hovering never triggers a full re-render.
+    let tooltip = wrap.querySelector(".graph-tooltip");
+    if (!tooltip) {
+      tooltip = document.createElement("div");
+      tooltip.className = "graph-tooltip";
+      wrap.appendChild(tooltip);
+    }
+    tooltip.style.display = "none";
+
     const numericRows = this._rows.filter((r) => r.numeric_value !== null);
     if (numericRows.length === 0) {
       ctx.fillStyle = "var(--secondary-text-color, #888)";
@@ -396,7 +407,7 @@ class HistoryTrimPanel extends HTMLElement {
       return;
     }
 
-    const padding = { top: 16, right: 16, bottom: 32, left: 56 };
+    const padding = { top: 16, right: 16, bottom: 46, left: 56 };
     const plotW = width - padding.left - padding.right;
     const plotH = height - padding.top - padding.bottom;
 
@@ -440,10 +451,20 @@ class HistoryTrimPanel extends HTMLElement {
     ctx.lineTo(padding.left + plotW, padding.top + plotH);
     ctx.stroke();
 
+    // Y axis min/max
     ctx.fillStyle = "var(--secondary-text-color, #888)";
     ctx.font = "11px sans-serif";
+    ctx.textAlign = "left";
     ctx.fillText(maxV.toFixed(1), 4, padding.top + 8);
     ctx.fillText(minV.toFixed(1), 4, padding.top + plotH);
+
+    // X axis min/max (start / end of the plotted range)
+    const xLabelY = padding.top + plotH + 16;
+    ctx.textAlign = "left";
+    ctx.fillText(new Date(minT).toLocaleString(), padding.left, xLabelY);
+    ctx.textAlign = "right";
+    ctx.fillText(new Date(maxT).toLocaleString(), padding.left + plotW, xLabelY);
+    ctx.textAlign = "left";
 
     // threshold lines
     ctx.setLineDash([5, 4]);
@@ -467,6 +488,7 @@ class HistoryTrimPanel extends HTMLElement {
     // series
     let colorIdx = 0;
     const legendItems = [];
+    const points = []; // flat list of hit-testable dots for the hover tooltip
     for (const [entityId, rows] of Object.entries(byEntity)) {
       const color = COLORS[colorIdx % COLORS.length];
       colorIdx += 1;
@@ -490,12 +512,13 @@ class HistoryTrimPanel extends HTMLElement {
         ctx.beginPath();
         ctx.arc(x, y, 2.5, 0, Math.PI * 2);
         ctx.fill();
+        points.push({ x, y, entityId, color, row });
       });
     }
 
     // legend
     let legendX = padding.left;
-    const legendY = height - 12;
+    const legendY = height - 8;
     ctx.font = "11px sans-serif";
     legendItems.forEach((item) => {
       ctx.fillStyle = item.color;
@@ -505,6 +528,51 @@ class HistoryTrimPanel extends HTMLElement {
       ctx.fillText(label, legendX + 14, legendY);
       legendX += ctx.measureText(label).width + 32;
     });
+
+    // Hover tooltip: find the nearest point within a small pixel radius
+    // and show its entity, value, and timestamp.
+    const HOVER_RADIUS_SQ = 12 * 12;
+    const showTooltipFor = (point) => {
+      tooltip.innerHTML = `
+        <div class="graph-tooltip-entity">${this._escape(point.entityId)}</div>
+        <div class="graph-tooltip-value">${this._escape(String(point.row.state))}</div>
+        <div class="graph-tooltip-time">${this._escape(
+          new Date(point.row.last_updated).toLocaleString()
+        )}</div>
+      `;
+      const left = Math.min(point.x + 12, width - 160);
+      const top = Math.max(point.y - 44, 0);
+      tooltip.style.left = `${left}px`;
+      tooltip.style.top = `${top}px`;
+      tooltip.style.display = "block";
+    };
+
+    canvas.onmousemove = (evt) => {
+      const rect = canvas.getBoundingClientRect();
+      const mx = evt.clientX - rect.left;
+      const my = evt.clientY - rect.top;
+      let nearest = null;
+      let nearestDist = Infinity;
+      for (const p of points) {
+        const dx = p.x - mx;
+        const dy = p.y - my;
+        const dist = dx * dx + dy * dy;
+        if (dist < nearestDist) {
+          nearestDist = dist;
+          nearest = p;
+        }
+      }
+      if (nearest && nearestDist <= HOVER_RADIUS_SQ) {
+        canvas.style.cursor = "pointer";
+        showTooltipFor(nearest);
+      } else {
+        canvas.style.cursor = "default";
+        tooltip.style.display = "none";
+      }
+    };
+    canvas.onmouseleave = () => {
+      tooltip.style.display = "none";
+    };
   }
 
   _attachListeners() {
@@ -788,6 +856,32 @@ class HistoryTrimPanel extends HTMLElement {
       }
       .graph-wrap {
         width: 100%;
+        position: relative;
+      }
+      .graph-tooltip {
+        position: absolute;
+        display: none;
+        pointer-events: none;
+        background: rgba(20, 20, 20, 0.92);
+        color: #fff;
+        padding: 6px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        line-height: 1.4;
+        white-space: nowrap;
+        z-index: 10;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+      }
+      .graph-tooltip-entity {
+        font-weight: 500;
+        opacity: 0.85;
+      }
+      .graph-tooltip-value {
+        font-size: 14px;
+        font-weight: 600;
+      }
+      .graph-tooltip-time {
+        opacity: 0.75;
       }
       canvas { display: block; width: 100%; }
       @media (max-width: 700px) {

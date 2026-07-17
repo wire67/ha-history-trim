@@ -68,8 +68,10 @@ automatically. It renders:
 - Start/end time inputs.
 - A threshold mode selector and min/max fields.
 - A **Table** view and a **Graph** view (a lightweight canvas line chart
-  with dashed threshold reference lines), toggled with buttons matching
-  core's view-switcher style.
+  with dashed threshold reference lines, min/max labels on both axes, and
+  a hover tooltip showing the exact value and timestamp of the point
+  under the cursor), toggled with buttons matching core's view-switcher
+  style.
 - A 🗑 delete button per table row, plus "Delete all shown" for bulk
   cleanup, both requiring a confirmation dialog.
 
@@ -84,6 +86,15 @@ upgrade Home Assistant and the panel starts failing to load history, check
 the Home Assistant log for `history_trim` errors — the recorder schema
 may have changed and the query in `websocket_api.py` will need a small
 update to match.
+
+### If you edit the panel JS yourself
+
+The frontend module is loaded with a cache-busting `?v=...` query string
+taken from `PANEL_VERSION` in `const.py`. If you customize
+`history-trim-panel.js` and your changes don't seem to show up after a
+restart, bump `PANEL_VERSION` too — otherwise your browser (or a service
+worker) may keep serving its previously cached copy of the file under the
+old URL.
 
 ---
 

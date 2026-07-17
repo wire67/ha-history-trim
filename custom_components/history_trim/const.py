@@ -10,6 +10,12 @@ PANEL_ICON = "mdi:filter-variant"
 JS_STATIC_PATH = "/history_trim_panel"
 JS_FILENAME = "history-trim-panel.js"
 
+# Bump this any time panel/history-trim-panel.js changes. It's appended to
+# the module URL as a cache-busting query string, since browsers (and any
+# service worker) will otherwise happily keep serving an old cached copy
+# of the JS file forever after you update it on disk.
+PANEL_VERSION = "1.2.0"
+
 SERVICE_PURGE_OUTLIERS = "purge_outliers"
 
 WS_TYPE_HISTORY = "history_trim/history"
