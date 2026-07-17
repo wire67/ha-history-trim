@@ -167,7 +167,10 @@ data:
   active.
 - Deleting a `states` row does not renumber or fix `old_state_id` links on
   neighboring rows; Home Assistant's history/logbook simply won't show the
-  deleted point anymore. This mirrors what recorder's own purge does.
+  deleted point anymore. This mirrors what recorder's own purge does. Any
+  other row whose `old_state_id` pointed at the deleted row has that link
+  nulled out automatically (otherwise SQLite raises a foreign key
+  constraint error on delete).
 - This does not touch long-term statistics (`statistics` /
   `statistics_short_term` tables used by the Energy dashboard and
   history graphs with a long time range). If a corrupt point has already

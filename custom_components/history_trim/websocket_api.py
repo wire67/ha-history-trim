@@ -172,6 +172,15 @@ def _delete_row_sync(hass: HomeAssistant, row_id: int) -> bool:
         row = session.query(States).filter(States.state_id == row_id).first()
         if row is None:
             return False
+        # The states table has a self-referential FK: States.old_state_id
+        # points at the state_id of the *previous* state for that entity.
+        # If some other (usually newer) row's old_state_id points at the
+        # row we're about to delete, SQLite will refuse the delete with a
+        # FOREIGN KEY constraint failure. Null out any such back-references
+        # first - this mirrors what recorder's own purge job does.
+        session.query(States).filter(States.old_state_id == row_id).update(
+            {States.old_state_id: None}, synchronize_session=False
+        )
         session.delete(row)
     return True
 
@@ -182,6 +191,11 @@ def _delete_rows_sync(hass: HomeAssistant, row_ids: list[int]) -> int:
     from homeassistant.components.recorder.util import session_scope
 
     with session_scope(hass=hass) as session:
+        # Same fix as _delete_row_sync, batched: clear every old_state_id
+        # that references any row we're about to remove.
+        session.query(States).filter(States.old_state_id.in_(row_ids)).update(
+            {States.old_state_id: None}, synchronize_session=False
+        )
         deleted = (
             session.query(States)
             .filter(States.state_id.in_(row_ids))
