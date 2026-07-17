@@ -59,7 +59,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
     await panel_custom.async_register_panel(
         hass,
-        webcomponent_name="ha-history-trim-panel",
+        webcomponent_name="history-trim-panel",
         frontend_url_path=PANEL_URL,
         module_url=f"{JS_STATIC_PATH}/{JS_FILENAME}",
         sidebar_title=PANEL_TITLE,

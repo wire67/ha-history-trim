@@ -1,5 +1,5 @@
 {
-  "domain": "ha_history_trim",
+  "domain": "history_trim",
   "name": "History Trim",
   "codeowners": [],
   "config_flow": false,

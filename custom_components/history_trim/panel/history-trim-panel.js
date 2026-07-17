@@ -13,7 +13,7 @@ const COLORS = [
   "#795548", "#009688", "#ffc107", "#3f51b5", "#f44336",
 ];
 
-class HistoryThresholdPanel extends HTMLElement {
+class HistoryTrimPanel extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
@@ -97,7 +97,7 @@ class HistoryThresholdPanel extends HTMLElement {
     this._render();
 
     const msg = {
-      type: "ha_history_trim/history",
+      type: "history_trim/history",
       entity_ids: this._selectedEntities,
       start_time: new Date(this._startTime).toISOString(),
       mode: this._mode,
@@ -131,7 +131,7 @@ class HistoryThresholdPanel extends HTMLElement {
 
     try {
       await this._hass.callWS({
-        type: "ha_history_trim/delete_row",
+        type: "history_trim/delete_row",
         row_id: rowId,
       });
       this._rows = this._rows.filter((r) => r.row_id !== rowId);
@@ -152,7 +152,7 @@ class HistoryThresholdPanel extends HTMLElement {
     try {
       const rowIds = this._rows.map((r) => r.row_id);
       await this._hass.callWS({
-        type: "ha_history_trim/delete_rows",
+        type: "history_trim/delete_rows",
         row_ids: rowIds,
       });
       this._rows = [];
@@ -759,4 +759,4 @@ class HistoryThresholdPanel extends HTMLElement {
   }
 }
 
-customElements.define("ha-history-trim-panel", HistoryThresholdPanel);
+customElements.define("history-trim-panel", HistoryTrimPanel);

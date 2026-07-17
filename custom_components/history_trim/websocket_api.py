@@ -234,7 +234,7 @@ async def ws_get_history(
         connection.send_result(msg["id"], {"rows": rows})
     except Exception as err:  # noqa: BLE001
         _LOGGER.exception("Error fetching filtered history")
-        connection.send_error(msg["id"], "ha_history_trim_error", str(err))
+        connection.send_error(msg["id"], "history_trim_error", str(err))
 
 
 @websocket_api.websocket_command(
@@ -256,7 +256,7 @@ async def ws_delete_row(
         connection.send_result(msg["id"], {"deleted": deleted})
     except Exception as err:  # noqa: BLE001
         _LOGGER.exception("Error deleting row %s", msg["row_id"])
-        connection.send_error(msg["id"], "ha_history_trim_delete_error", str(err))
+        connection.send_error(msg["id"], "history_trim_delete_error", str(err))
 
 
 @websocket_api.websocket_command(
@@ -278,4 +278,4 @@ async def ws_delete_rows(
         connection.send_result(msg["id"], {"deleted": count})
     except Exception as err:  # noqa: BLE001
         _LOGGER.exception("Error deleting rows")
-        connection.send_error(msg["id"], "ha_history_trim_delete_error", str(err))
+        connection.send_error(msg["id"], "history_trim_delete_error", str(err))

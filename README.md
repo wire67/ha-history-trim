@@ -10,7 +10,7 @@ the core **History** page, with three additions core doesn't offer:
    (entity, state, timestamp, attributes), as an alternative to the graph.
 3. **Row deletion** – a delete button on each row (and a "delete all shown"
    button) that permanently removes that row from the recorder database.
-   A `ha_history_trim.purge_outliers` service is also included for
+   A `history_trim.purge_outliers` service is also included for
    automation-driven cleanup.
 
 > ⚠️ **Deleting recorder rows is irreversible.** There is no undo. Always
@@ -29,14 +29,14 @@ integration ships its own minimal panel that talks to a small custom
 backend:
 
 ```
-custom_components/ha_history_trim/
+custom_components/history_trim/
 ├── __init__.py          Sets up the panel, static file serving, websocket
 │                         commands, and the purge_outliers service.
 ├── const.py              Shared constants.
 ├── manifest.json          Integration metadata/dependencies.
 ├── services.yaml           Service definition shown in Developer Tools.
 └── panel/
-    └── ha-history-trim-panel.js   The frontend panel (vanilla JS, no
+    └── history-trim-panel.js   The frontend panel (vanilla JS, no
                                       build step, no external dependencies).
 ```
 
@@ -50,15 +50,15 @@ on the recorder's own executor thread — never on the event loop.
 
 Two websocket commands do the work:
 
-- `ha_history_trim/history` — fetch raw rows for a list of entities and a
+- `history_trim/history` — fetch raw rows for a list of entities and a
   time range, filtered by threshold `mode` (`above`, `below`, `outside`,
   `inside`, or `none`) and `min_threshold` / `max_threshold`.
-- `ha_history_trim/delete_row` / `ha_history_trim/delete_rows` — delete
+- `history_trim/delete_row` / `history_trim/delete_rows` — delete
   one or more rows by `state_id`. Both require admin privileges
   (`@websocket_api.require_admin`).
 
-**Frontend (`ha-history-trim-panel.js`)** is a single self-contained
-custom element (`<ha-history-trim-panel>`) using Shadow DOM and no
+**Frontend (`history-trim-panel.js`)** is a single self-contained
+custom element (`<history-trim-panel>`) using Shadow DOM and no
 external imports, so it has no build step and no CDN dependency — it just
 needs to be served as a static file, which `__init__.py` sets up
 automatically. It renders:
@@ -81,7 +81,7 @@ public API and can change between Home Assistant core releases. It was
 written against the schema used by modern (2024.x+) core, where states are
 split across `states`, `states_meta`, and `state_attributes` tables. If you
 upgrade Home Assistant and the panel starts failing to load history, check
-the Home Assistant log for `ha_history_trim` errors — the recorder schema
+the Home Assistant log for `history_trim` errors — the recorder schema
 may have changed and the query in `websocket_api.py` will need a small
 update to match.
 
@@ -91,18 +91,18 @@ update to match.
 
 ### Option A: Manual
 
-1. Copy the `custom_components/ha_history_trim` folder from this package
+1. Copy the `custom_components/history_trim` folder from this package
    into your Home Assistant config directory, so you end up with:
    ```
-   <config>/custom_components/ha_history_trim/__init__.py
-   <config>/custom_components/ha_history_trim/const.py
-   <config>/custom_components/ha_history_trim/manifest.json
-   <config>/custom_components/ha_history_trim/services.yaml
-   <config>/custom_components/ha_history_trim/panel/ha-history-trim-panel.js
+   <config>/custom_components/history_trim/__init__.py
+   <config>/custom_components/history_trim/const.py
+   <config>/custom_components/history_trim/manifest.json
+   <config>/custom_components/history_trim/services.yaml
+   <config>/custom_components/history_trim/panel/history-trim-panel.js
    ```
 2. Add the following to `configuration.yaml`:
    ```yaml
-   ha_history_trim:
+   history_trim:
    ```
 3. Restart Home Assistant.
 4. A new **History Trim** entry will appear in the sidebar (visible to
@@ -111,9 +111,9 @@ update to match.
 ### Option B: HACS (custom repository)
 
 1. In HACS, go to **Integrations → ⋮ → Custom repositories**.
-2. Add this repository's URL with category **Integration**.
+2. Add `https://github.com/wire67/ha-history-trim` with category **Integration**.
 3. Install "History Trim", then restart Home Assistant.
-4. Add `ha_history_trim:` to `configuration.yaml` and restart again (HACS
+4. Add `history_trim:` to `configuration.yaml` and restart again (HACS
    installs the files but you still need to enable the integration via
    YAML, since it has no config flow).
 
@@ -140,12 +140,12 @@ update to match.
 
 ### Automating cleanup
 
-Call the `ha_history_trim.purge_outliers` service (from Developer Tools →
+Call the `history_trim.purge_outliers` service (from Developer Tools →
 Actions, or in an automation/script) to delete matching rows without
 opening the panel:
 
 ```yaml
-action: ha_history_trim.purge_outliers
+action: history_trim.purge_outliers
 data:
   entity_id: sensor.outdoor_temperature
   start_time: "2026-07-01T00:00:00"
