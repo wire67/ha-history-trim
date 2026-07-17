@@ -13,6 +13,8 @@ const COLORS = [
   "#795548", "#009688", "#ffc107", "#3f51b5", "#f44336",
 ];
 
+const FORM_STORAGE_KEY = "history_trim.form_state";
+
 class HistoryTrimPanel extends HTMLElement {
   constructor() {
     super();
@@ -26,18 +28,48 @@ class HistoryTrimPanel extends HTMLElement {
     this._loading = false;
     this._error = null;
 
-    this._selectedEntities = [];
+    const saved = this._loadFormState();
+    this._selectedEntities = saved.selectedEntities || [];
     this._entityFilterText = "";
-    this._mode = "above";
-    this._minThreshold = "";
-    this._maxThreshold = "";
-    this._startTime = this._defaultStart();
-    this._endTime = "";
+    this._mode = saved.mode || "above";
+    this._minThreshold = saved.minThreshold ?? "";
+    this._maxThreshold = saved.maxThreshold ?? "";
+    this._startTime = saved.startTime || this._defaultStart();
+    this._endTime = saved.endTime ?? "";
+  }
+
+  _loadFormState() {
+    try {
+      const raw = window.localStorage.getItem(FORM_STORAGE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch (err) {
+      // Storage unavailable (private browsing, etc.) - fall back to defaults.
+      return {};
+    }
+  }
+
+  _saveFormState() {
+    try {
+      window.localStorage.setItem(
+        FORM_STORAGE_KEY,
+        JSON.stringify({
+          selectedEntities: this._selectedEntities,
+          mode: this._mode,
+          minThreshold: this._minThreshold,
+          maxThreshold: this._maxThreshold,
+          startTime: this._startTime,
+          endTime: this._endTime,
+        })
+      );
+    } catch (err) {
+      // Ignore - persistence is a convenience, not a requirement.
+    }
   }
 
   set hass(hass) {
     const firstRun = !this._hass;
     this._hass = hass;
+
     if (firstRun) {
       this._initialized = true;
       this._render();
@@ -169,6 +201,7 @@ class HistoryTrimPanel extends HTMLElement {
     } else {
       this._selectedEntities = this._selectedEntities.filter((e) => e !== entityId);
     }
+    this._saveFormState();
     this._render();
   }
 
@@ -501,30 +534,35 @@ class HistoryTrimPanel extends HTMLElement {
     if (startTime) {
       startTime.addEventListener("change", (e) => {
         this._startTime = e.target.value;
+        this._saveFormState();
       });
     }
     const endTime = root.getElementById("end-time");
     if (endTime) {
       endTime.addEventListener("change", (e) => {
         this._endTime = e.target.value;
+        this._saveFormState();
       });
     }
     const mode = root.getElementById("mode");
     if (mode) {
       mode.addEventListener("change", (e) => {
         this._mode = e.target.value;
+        this._saveFormState();
       });
     }
     const minThreshold = root.getElementById("min-threshold");
     if (minThreshold) {
       minThreshold.addEventListener("change", (e) => {
         this._minThreshold = e.target.value;
+        this._saveFormState();
       });
     }
     const maxThreshold = root.getElementById("max-threshold");
     if (maxThreshold) {
       maxThreshold.addEventListener("change", (e) => {
         this._maxThreshold = e.target.value;
+        this._saveFormState();
       });
     }
 

@@ -112,10 +112,14 @@ update to match.
 
 1. In HACS, go to **Integrations → ⋮ → Custom repositories**.
 2. Add `https://github.com/wire67/ha-history-trim` with category **Integration**.
-3. Install "History Trim", then restart Home Assistant.
-4. Add `history_trim:` to `configuration.yaml` and restart again (HACS
-   installs the files but you still need to enable the integration via
-   YAML, since it has no config flow).
+3. "History Trim" now shows up as a normal HACS integration card — open it
+   and click **Download** (bottom right) to actually pull the files into
+   `config/custom_components/history_trim/`. Adding the custom repository
+   only makes it visible to HACS; it does not install anything by itself.
+4. Add `history_trim:` to `configuration.yaml`.
+5. Restart Home Assistant (HACS installs the files but you still need to
+   enable the integration via YAML and restart, since it has no config
+   flow).
 
 ---
 
@@ -173,6 +177,10 @@ data:
 - The entity picker loads all entities into a checkbox list; on very large
   installations (thousands of entities) the filter box is there to help you
   narrow it down quickly.
+- Your last-used entities, time range, mode, and min/max thresholds are
+  remembered via the browser's `localStorage` and pre-filled the next time
+  you open the panel. This is per-browser (not synced between devices or
+  admin accounts) and never leaves your browser.
 
 ## License
 
