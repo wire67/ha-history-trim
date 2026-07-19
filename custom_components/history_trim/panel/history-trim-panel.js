@@ -292,6 +292,56 @@ class HistoryTrimPanel extends HTMLElement {
   }
 
   // -------------------------------------------------------------------
+  // Entity search
+  // -------------------------------------------------------------------
+
+  /**
+   * Split text into lowercase word tokens on whitespace, underscores, dots
+   * and hyphens - e.g. "sensor.living_room_temp" -> ["sensor", "living",
+   * "room", "temp"], and "Living Room" -> ["living", "room"].
+   */
+  _toWords(text) {
+    return (text || "")
+      .toLowerCase()
+      .split(/[\s._-]+/)
+      .filter(Boolean);
+  }
+
+  /**
+   * Filter entities so every whitespace-separated word the user typed
+   * matches (as a prefix/substring of) at least one word in either the
+   * entity's friendly name or its entity id, then sort so that already
+   * checked entities float to the top (alphabetically within each group).
+   */
+  _filterAndSortEntityIds(allEntityIds) {
+    const queryWords = this._toWords(this._entityFilterText);
+
+    const matches = (id) => {
+      if (queryWords.length === 0) return true;
+      const name =
+        (this._hass.states[id].attributes &&
+          this._hass.states[id].attributes.friendly_name) ||
+        "";
+      const haystackWords = this._toWords(id).concat(this._toWords(name));
+      return queryWords.every((qw) =>
+        haystackWords.some((hw) => hw.includes(qw))
+      );
+    };
+
+    const filtered = allEntityIds.filter(matches);
+
+    const selected = new Set(this._selectedEntities);
+    filtered.sort((a, b) => {
+      const aSel = selected.has(a);
+      const bSel = selected.has(b);
+      if (aSel !== bSel) return aSel ? -1 : 1;
+      return a.localeCompare(b);
+    });
+
+    return filtered;
+  }
+
+  // -------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------
 
@@ -299,10 +349,7 @@ class HistoryTrimPanel extends HTMLElement {
     if (!this._hass) return;
 
     const allEntityIds = Object.keys(this._hass.states).sort();
-    const filterLower = this._entityFilterText.toLowerCase();
-    const visibleEntityIds = filterLower
-      ? allEntityIds.filter((id) => id.toLowerCase().includes(filterLower))
-      : allEntityIds;
+    const visibleEntityIds = this._filterAndSortEntityIds(allEntityIds);
 
     this.shadowRoot.innerHTML = `
       <style>${this._styles()}</style>

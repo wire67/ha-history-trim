@@ -65,6 +65,11 @@ automatically. It renders:
 
 - An entity picker (searchable checkbox list, since a full HA entity picker
   component isn't guaranteed to be registered before this panel loads).
+  Typing multiple words matches each word independently against either the
+  friendly name or the entity id (e.g. "kitchen temp" matches
+  `sensor.kitchen_temperature` even though the words appear in a different
+  order than the id itself), and any already-checked entities are sorted
+  to the top of the list so they stay visible while you keep searching.
 - Start/end time inputs.
 - A threshold mode selector and min/max fields.
 - A **Table** view and a **Graph** view (a lightweight canvas line chart

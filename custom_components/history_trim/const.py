@@ -14,7 +14,7 @@ JS_FILENAME = "history-trim-panel.js"
 # the module URL as a cache-busting query string, since browsers (and any
 # service worker) will otherwise happily keep serving an old cached copy
 # of the JS file forever after you update it on disk.
-PANEL_VERSION = "1.3.0"
+PANEL_VERSION = "1.4.0"
 
 SERVICE_PURGE_OUTLIERS = "purge_outliers"
 
